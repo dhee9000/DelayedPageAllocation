@@ -75,6 +75,48 @@ trap(struct trapframe *tf)
             cpu->id, tf->cs, tf->eip);
     lapiceoi();
     break;
+  
+  case T_PGFLT: {
+    uint va = rcr2();
+    char* pg_base;
+
+    pg_base = PGROUNDDOWN(va);
+    
+    char *mem;
+    uint a;
+
+    // Code borrowed from allocuvm
+    a = PGROUNDUP(proc->sz);
+    for(; a < proc->sz + PGSIZE; a += PGSIZE){
+      mem = kalloc();
+      if(mem == 0){
+        cprintf("delayedpgalloc out of memory\n");
+        deallocuvm(proc->pgdir, proc->sz + PGSIZE, proc->sz);
+        // Use default behavior on error
+        cprintf("pid %d %s: trap %d err %d on cpu %d "
+                "eip 0x%x addr 0x%x--kill proc\n",
+                proc->pid, proc->name, tf->trapno, tf->err, cpu->id, tf->eip, 
+                rcr2());
+        proc->killed = 1;
+      }
+      cprintf("page fault detected and caught\n");
+      // Clears the page with 0s
+      memset(mem, 0, PGSIZE);
+      // Maps the page with a PTE in pgdir
+      if(mappages(proc->pgdir, pg_base, PGSIZE, PADDR(mem), PTE_W|PTE_U) == 0){
+        cprintf("page map success\n");
+      }
+      else{
+        cprintf("pid %d %s: trap %d err %d on cpu %d "
+                "eip 0x%x addr 0x%x--kill proc\n",
+                proc->pid, proc->name, tf->trapno, tf->err, cpu->id, tf->eip, 
+                rcr2());
+        proc->killed = 1;
+      }
+    }
+
+    break;
+  }
    
   default:
     if(proc == 0 || (tf->cs&3) == 0){
